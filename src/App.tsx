@@ -41,6 +41,9 @@ export default function App() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSavedMsg, setProfileSavedMsg] = useState(false);
 
+  // Toast state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   const handleSaveApiKey = (key: string) => {
     setGeminiApiKey(key);
     localStorage.setItem("devfinancial_gemini_api_key", key);
@@ -171,7 +174,7 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab === "profile") {
-      setProfileName(user.name || "");
+      setProfileName(user.name || (user.isLoggedIn && user.email ? user.email.split("@")[0] : ""));
       setProfileAvatar(user.avatar || "");
       setProfileSavedMsg(false);
     }
@@ -217,22 +220,21 @@ export default function App() {
       const restoredUser = {
         email,
         isLoggedIn: true,
-        name: data.userProfile?.name || "",
+        name: data.userProfile?.name || email.split("@")[0],
         avatar: data.userProfile?.avatar || "",
       };
       setUser(restoredUser);
       localStorage.setItem("devfinancial_user", JSON.stringify(restoredUser));
 
       if (data.transactions && data.transactions.length > 0) {
-        // If server data exists, prompt backup restore override
+        // If server data exists, restore it (typical login case)
         setTransactions(data.transactions);
         localStorage.setItem("devfinancial_txs", JSON.stringify(data.transactions));
         triggerAIInsight(data.transactions);
       } else {
-        // New user: Start fresh with empty transactions and 0 balance
-        setTransactions([]);
-        localStorage.setItem("devfinancial_txs", JSON.stringify([]));
-        triggerAIInsight([]);
+        // New user registration: Sync existing guest transactions to the server database
+        await saveTransactionsAndSync(transactions, restoredUser);
+        triggerAIInsight(transactions);
       }
     } catch (err) {
       console.error("Sync restore failed:", err);
@@ -326,6 +328,10 @@ export default function App() {
     const updatedTxs = [fullTx, ...transactions];
     saveTransactionsAndSync(updatedTxs);
     setIsModalOpen(false);
+
+    // Trigger success toast notification
+    setToastMessage("Transaksi berhasil disimpan!");
+    setTimeout(() => setToastMessage(null), 3000);
 
     // Refresh AI insight on adding transaction automatically
     triggerAIInsight(updatedTxs);
@@ -443,6 +449,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f8f9ff] text-slate-800 dark:bg-[#0b0f19] dark:text-slate-100 flex flex-col font-sans relative pb-20 md:pb-6 transition-colors duration-300" id="app-root-viewport">
+      
+      {/* Dynamic Success Toast Alert */}
+      {toastMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#006c49] dark:bg-[#10b981] text-white font-bold text-xs px-5 py-3.5 rounded-full shadow-lg flex items-center gap-2 animate-in slide-in-from-top duration-300">
+          <span className="material-symbols-outlined text-[16px]">check_circle</span>
+          <span>{toastMessage}</span>
+        </div>
+      )}
       
       {/* Top App Bar Header following design system mockup */}
       <header className="bg-white/85 dark:bg-[#111827]/85 backdrop-blur-md border-b border-slate-100 dark:border-gray-800/80 flex justify-between items-center px-4 md:px-8 w-full h-16 sticky top-0 z-40 shadow-xs" id="app-top-header">
@@ -790,7 +804,7 @@ export default function App() {
                   <div className="flex gap-2 flex-wrap items-center">
                     {["#006c49", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6"].map((color) => {
                       // Initials Avatar data URL
-                      const avatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="${encodeURIComponent(color)}"/><text x="50%" y="60%" font-size="50" font-family="system-ui, sans-serif" font-weight="bold" fill="white" text-anchor="middle">${encodeURIComponent(profileName ? profileName.slice(0, 2).toUpperCase() : "DF")}</text></svg>`;
+                      const avatarSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="${encodeURIComponent(color)}"/><text x="50%" y="50%" dominant-baseline="central" font-size="45" font-family="system-ui, sans-serif" font-weight="bold" fill="white" text-anchor="middle">${encodeURIComponent(profileName ? profileName.slice(0, 2).toUpperCase() : "DF")}</text></svg>`;
                       const isSelected = profileAvatar === avatarSvg;
                       return (
                         <button
