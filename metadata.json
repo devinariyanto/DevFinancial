@@ -1,0 +1,6 @@
+{
+  "name": "DevFinancial",
+  "description": "A beautiful local-first personal financial tracker with visual analytics, budget spending alerts, and smart AI insights.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
