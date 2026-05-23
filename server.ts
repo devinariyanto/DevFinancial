@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
-import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 
 // Load environment variables
@@ -144,6 +143,9 @@ async function getUser(email: string): Promise<User | null> {
     const res = await runKVCommand(["GET", `user:${emailLower}`]);
     return res ? JSON.parse(res) : null;
   }
+  if (process.env.VERCEL) {
+    return memoryUsers[emailLower] || null;
+  }
   try {
     const users = readJSONFile(USERS_FILE);
     return users[emailLower] || null;
@@ -157,6 +159,10 @@ async function saveUser(email: string, user: User): Promise<boolean> {
   const emailLower = email.toLowerCase().trim();
   if (isKVEnabled()) {
     await runKVCommand(["SET", `user:${emailLower}`, JSON.stringify(user)]);
+    return true;
+  }
+  if (process.env.VERCEL) {
+    memoryUsers[emailLower] = user;
     return true;
   }
   try {
@@ -178,6 +184,9 @@ async function getBackup(email: string): Promise<Backup | null> {
     const res = await runKVCommand(["GET", `backup:${emailLower}`]);
     return res ? JSON.parse(res) : null;
   }
+  if (process.env.VERCEL) {
+    return memoryBackups[emailLower] || null;
+  }
   try {
     const backups = readJSONFile(BACKUPS_FILE);
     return backups[emailLower] || null;
@@ -191,6 +200,10 @@ async function saveBackup(email: string, backup: Backup): Promise<boolean> {
   const emailLower = email.toLowerCase().trim();
   if (isKVEnabled()) {
     await runKVCommand(["SET", `backup:${emailLower}`, JSON.stringify(backup)]);
+    return true;
+  }
+  if (process.env.VERCEL) {
+    memoryBackups[emailLower] = backup;
     return true;
   }
   try {
@@ -522,6 +535,8 @@ Kategori Pengeluaran Terbesar: ${topCategoryInfo}
 // Configure development and production modes
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    // Dynamic import to prevent bundler errors on Vercel
+    const { createServer: createViteServer } = await import("vite");
     // Vite middleware for smooth development
     const vite = await createViteServer({
       server: { middlewareMode: true },
