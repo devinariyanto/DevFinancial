@@ -535,8 +535,9 @@ Kategori Pengeluaran Terbesar: ${topCategoryInfo}
 // Configure development and production modes
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
-    // Dynamic import to prevent bundler errors on Vercel
-    const { createServer: createViteServer } = await import("vite");
+    // Hide import from Vercel's static analyzer to prevent native binary bundling issues
+    const viteModule = "vite";
+    const { createServer: createViteServer } = await import(viteModule);
     // Vite middleware for smooth development
     const vite = await createViteServer({
       server: { middlewareMode: true },
