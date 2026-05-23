@@ -46,10 +46,16 @@ const PORT = 3000;
 app.use(express.json());
 
 // In-memory or simple file-based JSON database for persistence
-// Ensure data folder exists
+// Ensure data folder exists (only if not on Vercel)
 const DATA_DIR = path.join(process.cwd(), "data");
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!process.env.VERCEL) {
+  if (!fs.existsSync(DATA_DIR)) {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    } catch (e) {
+      console.warn("Could not create local data directory:", e);
+    }
+  }
 }
 
 const USERS_FILE = path.join(DATA_DIR, "users.json");
