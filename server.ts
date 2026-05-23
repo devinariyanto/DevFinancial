@@ -77,42 +77,158 @@ function writeJSONFile(filePath: string, data: any) {
   }
 }
 
-// Initialize files if empty
-if (!fs.existsSync(USERS_FILE)) writeJSONFile(USERS_FILE, {});
-if (!fs.existsSync(BACKUPS_FILE)) writeJSONFile(BACKUPS_FILE, {});
+// Database Interfaces
+interface User {
+  password: string;
+  createdAt: string;
+  isGoogleUser?: boolean;
+}
+
+interface Backup {
+  transactions: any[];
+  categories: any[];
+  budgets: any[];
+  userProfile: any;
+  syncedAt: string;
+}
+
+// In-memory fallbacks if writing to disk fails on Vercel without KV configured
+const memoryUsers: Record<string, User> = {};
+const memoryBackups: Record<string, Backup> = {};
+
+// Helper to check if Vercel KV is configured
+const isKVEnabled = () => !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+
+// Execute a Vercel KV REST command
+async function runKVCommand(command: any[]) {
+  try {
+    const response = await fetch(process.env.KV_REST_API_URL!, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(command),
+    });
+    if (!response.ok) {
+      throw new Error(`KV Command failed with status ${response.status}`);
+    }
+    const data = await response.json();
+    return data.result;
+  } catch (err) {
+    console.error("Vercel KV Error:", err);
+    return null;
+  }
+}
+
+// Initialize local files if they don't exist and we're not on Vercel
+if (!process.env.VERCEL) {
+  try {
+    if (!fs.existsSync(USERS_FILE)) writeJSONFile(USERS_FILE, {});
+    if (!fs.existsSync(BACKUPS_FILE)) writeJSONFile(BACKUPS_FILE, {});
+  } catch (e) {
+    console.warn("Could not initialize local database files:", e);
+  }
+}
+
+// Get User Helper
+async function getUser(email: string): Promise<User | null> {
+  const emailLower = email.toLowerCase().trim();
+  if (isKVEnabled()) {
+    const res = await runKVCommand(["GET", `user:${emailLower}`]);
+    return res ? JSON.parse(res) : null;
+  }
+  try {
+    const users = readJSONFile(USERS_FILE);
+    return users[emailLower] || null;
+  } catch (err) {
+    return memoryUsers[emailLower] || null;
+  }
+}
+
+// Save User Helper
+async function saveUser(email: string, user: User): Promise<boolean> {
+  const emailLower = email.toLowerCase().trim();
+  if (isKVEnabled()) {
+    await runKVCommand(["SET", `user:${emailLower}`, JSON.stringify(user)]);
+    return true;
+  }
+  try {
+    const users = readJSONFile(USERS_FILE);
+    users[emailLower] = user;
+    writeJSONFile(USERS_FILE, users);
+    return true;
+  } catch (err) {
+    console.warn("Read-only filesystem. Saving user in-memory:", err);
+    memoryUsers[emailLower] = user;
+    return true;
+  }
+}
+
+// Get Backup Helper
+async function getBackup(email: string): Promise<Backup | null> {
+  const emailLower = email.toLowerCase().trim();
+  if (isKVEnabled()) {
+    const res = await runKVCommand(["GET", `backup:${emailLower}`]);
+    return res ? JSON.parse(res) : null;
+  }
+  try {
+    const backups = readJSONFile(BACKUPS_FILE);
+    return backups[emailLower] || null;
+  } catch (err) {
+    return memoryBackups[emailLower] || null;
+  }
+}
+
+// Save Backup Helper
+async function saveBackup(email: string, backup: Backup): Promise<boolean> {
+  const emailLower = email.toLowerCase().trim();
+  if (isKVEnabled()) {
+    await runKVCommand(["SET", `backup:${emailLower}`, JSON.stringify(backup)]);
+    return true;
+  }
+  try {
+    const backups = readJSONFile(BACKUPS_FILE);
+    backups[emailLower] = backup;
+    writeJSONFile(BACKUPS_FILE, backups);
+    return true;
+  } catch (err) {
+    console.warn("Read-only filesystem. Saving backup in-memory:", err);
+    memoryBackups[emailLower] = backup;
+    return true;
+  }
+}
 
 // API Route: Register
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "Email dan password diperlukan" });
   }
 
   const emailLower = email.toLowerCase().trim();
-  const users = readJSONFile(USERS_FILE);
+  const existingUser = await getUser(emailLower);
 
-  if (users[emailLower]) {
+  if (existingUser) {
     return res.status(400).json({ error: "Email sudah terdaftar" });
   }
 
-  // Save user credentials (simple text hashing or plain since it is helper sandbox)
-  users[emailLower] = { password, createdAt: new Date().toISOString() };
-  writeJSONFile(USERS_FILE, users);
+  // Save user credentials
+  await saveUser(emailLower, { password, createdAt: new Date().toISOString() });
 
   return res.json({ success: true, email: emailLower });
 });
 
 // API Route: Login
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "Email dan password diperlukan" });
   }
 
   const emailLower = email.toLowerCase().trim();
-  const users = readJSONFile(USERS_FILE);
+  const user = await getUser(emailLower);
 
-  const user = users[emailLower];
   if (!user || user.password !== password) {
     return res.status(401).json({ error: "Email atau password salah" });
   }
@@ -121,29 +237,28 @@ app.post("/api/auth/login", (req, res) => {
 });
 
 // API Route: Google Auth (Mock/Simulated)
-app.post("/api/auth/google", (req, res) => {
+app.post("/api/auth/google", async (req, res) => {
   const { email, name, avatar } = req.body;
   if (!email) {
     return res.status(400).json({ error: "Email diperlukan untuk login Google" });
   }
 
   const emailLower = email.toLowerCase().trim();
-  const users = readJSONFile(USERS_FILE);
+  const existingUser = await getUser(emailLower);
 
   // If user does not exist, register them automatically
-  if (!users[emailLower]) {
-    users[emailLower] = { 
+  if (!existingUser) {
+    await saveUser(emailLower, { 
       password: "google-authenticated-session", 
       createdAt: new Date().toISOString(),
       isGoogleUser: true
-    };
-    writeJSONFile(USERS_FILE, users);
+    });
   }
 
   // Create mock backup workspace with profile details if none exists
-  const backups = readJSONFile(BACKUPS_FILE);
-  if (!backups[emailLower]) {
-    backups[emailLower] = {
+  const existingBackup = await getBackup(emailLower);
+  if (!existingBackup) {
+    await saveBackup(emailLower, {
       transactions: [],
       categories: [],
       budgets: [],
@@ -152,46 +267,43 @@ app.post("/api/auth/google", (req, res) => {
         avatar: avatar || "",
       },
       syncedAt: new Date().toISOString(),
-    };
-    writeJSONFile(BACKUPS_FILE, backups);
+    });
   }
 
   return res.json({ success: true, email: emailLower });
 });
 
 // API Route: Backup data to cloud
-app.post("/api/sync/backup", (req, res) => {
+app.post("/api/sync/backup", async (req, res) => {
   const { email, transactions, categories, budgets, userProfile } = req.body;
   if (!email) {
     return res.status(400).json({ error: "Email diperlukan untuk sinkronisasi" });
   }
 
   const emailLower = email.toLowerCase().trim();
-  const backups = readJSONFile(BACKUPS_FILE);
+  const syncedAt = new Date().toISOString();
 
-  backups[emailLower] = {
+  await saveBackup(emailLower, {
     transactions: transactions || [],
     categories: categories || [],
     budgets: budgets || [],
     userProfile: userProfile || null,
-    syncedAt: new Date().toISOString(),
-  };
+    syncedAt,
+  });
 
-  writeJSONFile(BACKUPS_FILE, backups);
-  return res.json({ success: true, syncedAt: backups[emailLower].syncedAt });
+  return res.json({ success: true, syncedAt });
 });
 
 // API Route: Restore data from cloud
-app.post("/api/sync/restore", (req, res) => {
+app.post("/api/sync/restore", async (req, res) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ error: "Email diperlukan untuk sinkronisasi" });
   }
 
   const emailLower = email.toLowerCase().trim();
-  const backups = readJSONFile(BACKUPS_FILE);
+  const backup = await getBackup(emailLower);
 
-  const backup = backups[emailLower];
   if (!backup) {
     return res.json({
       transactions: [],
@@ -424,4 +536,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
