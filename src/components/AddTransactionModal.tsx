@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Category, Transaction, TransactionType } from "../types";
+import { Category, Transaction, TransactionType, RecurringFrequency } from "../types";
 import { DEFAULT_CATEGORIES } from "../data";
-import { X, Check, Calendar } from "lucide-react";
+import { X, Check, Calendar, Repeat } from "lucide-react";
 
 interface AddTransactionModalProps {
   onClose: () => void;
@@ -53,6 +53,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   };
   const [date, setDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [note, setNote] = useState<string>("");
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringFreq, setRecurringFreq] = useState<RecurringFrequency>("monthly");
   const [selectedGroup, setSelectedGroup] = useState<"umum" | "saham" | "crypto">("umum");
 
   // Filter categories depending on selected type and group
@@ -91,6 +93,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       category: category.name,
       date,
       note: note.trim(),
+      ...(isRecurring ? { recurringRule: { frequency: recurringFreq, lastGenerated: date } } : {}),
     });
   };
 
@@ -267,6 +270,50 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
                 rows={2}
                 className="w-full text-slate-700 dark:text-white bg-slate-50 dark:bg-gray-900/50 border border-slate-100 dark:border-gray-700 rounded-xl px-4 py-3 placeholder:text-slate-400 dark:placeholder:text-gray-600 text-sm focus:outline-hidden focus:border-slate-300 dark:focus:border-gray-500 resize-none font-medium"
               ></textarea>
+            </div>
+
+            {/* Recurring Transaction Toggle */}
+            <div className="flex flex-col gap-2" id="recurring-toggle-wrapper">
+              <label className="text-[11px] font-bold text-slate-400 dark:text-gray-500 uppercase tracking-widest flex items-center gap-1">
+                <Repeat size={12} />
+                Transaksi Berulang
+              </label>
+              <div className="bg-slate-50 dark:bg-gray-900/50 border border-slate-100 dark:border-gray-700 rounded-xl p-3 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-600 dark:text-gray-300">
+                    {isRecurring ? "Aktif — otomatis berulang" : "Nonaktif"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsRecurring(!isRecurring)}
+                    className={`relative w-11 h-6 rounded-full transition-colors duration-300 cursor-pointer ${
+                      isRecurring ? "bg-[#10b981]" : "bg-slate-300 dark:bg-gray-600"
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-300 ${
+                      isRecurring ? "translate-x-5" : "translate-x-0"
+                    }`}></span>
+                  </button>
+                </div>
+                {isRecurring && (
+                  <div className="flex gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                    {(["daily", "weekly", "monthly"] as RecurringFrequency[]).map(freq => (
+                      <button
+                        key={freq}
+                        type="button"
+                        onClick={() => setRecurringFreq(freq)}
+                        className={`flex-1 py-2 rounded-lg text-xs font-bold text-center transition-all cursor-pointer ${
+                          recurringFreq === freq
+                            ? "bg-[#006c49] dark:bg-[#10b981] text-white shadow-sm"
+                            : "bg-white dark:bg-gray-800 text-slate-500 dark:text-gray-400 hover:text-slate-700 dark:hover:text-gray-200 border border-slate-100 dark:border-gray-700"
+                        }`}
+                      >
+                        {freq === "daily" ? "Harian" : freq === "weekly" ? "Mingguan" : "Bulanan"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
           </div>

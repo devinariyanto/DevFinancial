@@ -1,5 +1,12 @@
 export type TransactionType = "income" | "expense";
 
+export type RecurringFrequency = "daily" | "weekly" | "monthly";
+
+export interface RecurringRule {
+  frequency: RecurringFrequency;
+  lastGenerated: string; // YYYY-MM-DD — last date this rule auto-generated a tx
+}
+
 export interface Transaction {
   id: string;
   type: TransactionType;
@@ -7,6 +14,7 @@ export interface Transaction {
   category: string;
   date: string; // YYYY-MM-DD
   note: string;
+  recurringRule?: RecurringRule; // if set, this tx is a recurring template
 }
 
 export interface Category {
@@ -22,6 +30,13 @@ export interface Category {
 export interface Budget {
   category: string;
   limit: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "ai";
+  text: string;
+  timestamp: string; // ISO string
 }
 
 export interface UserSession {

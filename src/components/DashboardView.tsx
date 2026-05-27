@@ -1,7 +1,7 @@
 import React from "react";
-import { Transaction, Category } from "../types";
+import { Transaction, Category, ChatMessage } from "../types";
 import { DEFAULT_CATEGORIES } from "../data";
-import { TrendingUp, TrendingDown, Plus, ArrowUpRight, ArrowDownRight, Bot, RotateCw, Wallet, ShieldAlert } from "lucide-react";
+import { TrendingUp, TrendingDown, Plus, ArrowUpRight, ArrowDownRight, Bot, RotateCw, Wallet, ShieldAlert, Repeat } from "lucide-react";
 
 interface DashboardViewProps {
   transactions: Transaction[];
@@ -24,6 +24,8 @@ interface DashboardViewProps {
   onToggleHideBalances: () => void;
   userName: string;
   userAvatar: string;
+  chatHistory: ChatMessage[];
+  onClearChat: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -47,8 +49,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onToggleHideBalances,
   userName,
   userAvatar,
+  chatHistory,
+  onClearChat,
 }) => {
   const [chatInput, setChatInput] = React.useState("");
+  const chatEndRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory]);
 
   const handleChatSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -365,6 +374,137 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </section>
 
+      {/* Financial Health Score Section */}
+      {(() => {
+        // Calculate Financial Health Score (0-100)
+        const savingsRatio = currentIncomeSum > 0
+          ? Math.max(0, Math.min(100, ((currentIncomeSum - currentExpenseSum) / currentIncomeSum) * 100))
+          : 0;
+
+        // Consistency: count unique days with transactions (last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const recentTxs = transactions.filter(t => new Date(t.date) >= thirtyDaysAgo);
+        const uniqueDays = new Set(recentTxs.map(t => t.date)).size;
+        const consistencyScore = Math.min(100, (uniqueDays / 10) * 100); // 10+ days = 100%
+
+        // Diversification: penalize if one expense category > 60% of total
+        let diversificationScore = 100;
+        if (activeExpenses.length > 0 && totalExpenseSum > 0) {
+          const topCatPct = (activeExpenses[0][1] / totalExpenseSum) * 100;
+          if (topCatPct > 80) diversificationScore = 20;
+          else if (topCatPct > 60) diversificationScore = 50;
+          else if (topCatPct > 40) diversificationScore = 75;
+          else diversificationScore = 100;
+        }
+
+        const healthScore = transactions.length === 0 ? 0 : Math.round(
+          savingsRatio * 0.4 + consistencyScore * 0.3 + diversificationScore * 0.3
+        );
+
+        const scoreColor = healthScore >= 70 ? "#10b981" : healthScore >= 40 ? "#f59e0b" : "#ef4444";
+        const scoreLabel = healthScore >= 70 ? "Sehat" : healthScore >= 40 ? "Perlu Perhatian" : "Kritis";
+        const scoreEmoji = healthScore >= 70 ? "🏆" : healthScore >= 40 ? "⚠️" : "🚨";
+
+        // SVG ring animation
+        const radius = 54;
+        const circumference = 2 * Math.PI * radius;
+        const strokeDashoffset = circumference - (healthScore / 100) * circumference;
+
+        // Tips based on score components
+        const tips: string[] = [];
+        if (savingsRatio < 20) tips.push("Tingkatkan rasio tabungan — targetkan minimal 20% dari pemasukan");
+        if (consistencyScore < 50) tips.push("Catat transaksi lebih rutin agar analisis lebih akurat");
+        if (diversificationScore < 75) tips.push("Diversifikasi pengeluaran — hindari dominasi satu kategori");
+        if (tips.length === 0) tips.push("Keuangan Anda dalam kondisi sangat baik! Pertahankan! 🎉");
+
+        return (
+          <section className="bg-white dark:bg-gray-800 rounded-[24px] p-6 shadow-[0px_4px_20px_rgba(0,0,0,0.05)] border border-slate-100 dark:border-gray-700/50 transition-all" id="section-health-score">
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              {/* Animated Ring Gauge */}
+              <div className="relative w-[140px] h-[140px] shrink-0">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+                  {/* Background ring */}
+                  <circle
+                    cx="60" cy="60" r={radius}
+                    fill="none"
+                    stroke="currentColor"
+                    className="text-slate-100 dark:text-gray-700"
+                    strokeWidth="10"
+                  />
+                  {/* Score ring */}
+                  <circle
+                    cx="60" cy="60" r={radius}
+                    fill="none"
+                    stroke={scoreColor}
+                    strokeWidth="10"
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={strokeDashoffset}
+                    className="transition-all duration-1000 ease-out"
+                    style={{ filter: `drop-shadow(0 0 6px ${scoreColor}40)` }}
+                  />
+                </svg>
+                {/* Center score text */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-3xl font-extrabold tracking-tight" style={{ color: scoreColor }}>
+                    {healthScore}
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-400 dark:text-gray-500 uppercase tracking-widest">
+                    / 100
+                  </span>
+                </div>
+              </div>
+
+              {/* Score details */}
+              <div className="flex-1 text-center sm:text-left">
+                <h2 className="text-lg font-extrabold text-slate-800 dark:text-white flex items-center gap-2 justify-center sm:justify-start">
+                  <span>{scoreEmoji}</span>
+                  <span>Financial Health Score</span>
+                </h2>
+                <p className="text-sm font-bold mt-1 mb-3" style={{ color: scoreColor }}>
+                  Status: {scoreLabel}
+                </p>
+
+                {/* Score breakdown bars */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-gray-400 w-24 shrink-0">Tabungan</span>
+                    <div className="flex-1 h-2 bg-slate-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-emerald-500 transition-all duration-700" style={{ width: `${Math.min(100, savingsRatio)}%` }}></div>
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-600 dark:text-gray-300 w-10 text-right">{Math.round(savingsRatio)}%</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-gray-400 w-24 shrink-0">Konsistensi</span>
+                    <div className="flex-1 h-2 bg-slate-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-blue-500 transition-all duration-700" style={{ width: `${Math.min(100, consistencyScore)}%` }}></div>
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-600 dark:text-gray-300 w-10 text-right">{Math.round(consistencyScore)}%</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-gray-400 w-24 shrink-0">Diversifikasi</span>
+                    <div className="flex-1 h-2 bg-slate-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-purple-500 transition-all duration-700" style={{ width: `${diversificationScore}%` }}></div>
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-600 dark:text-gray-300 w-10 text-right">{diversificationScore}%</span>
+                  </div>
+                </div>
+
+                {/* Tip */}
+                <div className="mt-3 px-3 py-2 rounded-xl bg-slate-50 dark:bg-gray-700/50 text-[11px] font-medium text-slate-600 dark:text-gray-300 flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[14px] text-amber-500 mt-0.5 shrink-0">lightbulb</span>
+                  <span>{tips[0]}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
+
+
+
+
       {/* Row 2: Spend Graph + AI Insights */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="visualization-grid">
         {/* Spending Card with Conic-gradient Donut Chart */}
@@ -404,94 +544,87 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </section>
 
-        {/* AI Insight Section */}
-        <section className="bg-sky-50/50 dark:bg-sky-950/15 rounded-[24px] p-6 flex flex-col justify-between relative overflow-hidden border border-sky-100/50 dark:border-sky-900/20 group min-h-[320px]" id="section-ai-insight">
+        {/* AI Chat History Section */}
+        <section className="bg-sky-50/50 dark:bg-sky-950/15 rounded-[24px] p-6 flex flex-col relative overflow-hidden border border-sky-100/50 dark:border-sky-900/20 group min-h-[320px] max-h-[500px]" id="section-ai-insight">
           {/* Decorative bubble */}
           <div className="absolute -right-10 -top-10 w-44 h-44 bg-sky-200/20 dark:bg-sky-900/10 rounded-full blur-3xl opacity-50"></div>
           
-          <div className="flex items-start gap-4 relative z-10 w-full">
-            <div className="w-12 h-12 rounded-full bg-white dark:bg-gray-800 shadow-sm flex items-center justify-center shrink-0 text-[#10b981]">
-              <span className="material-symbols-outlined fill text-[24px] font-variation-settings-'FILL'-1">smart_toy</span>
-            </div>
-            
-            <div className="flex-1 w-full">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-md font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                  DevFinancial AI
-                </h3>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={onRefreshInsight}
-                    disabled={isLoadingInsight}
-                    className="p-1.5 rounded-full hover:bg-white dark:hover:bg-gray-700 text-slate-400 hover:text-[#10b981] dark:hover:text-[#10b981] disabled:opacity-50 transition-all cursor-pointer active:scale-95"
-                    title="Minta saran baru"
-                    id="btn-refresh-insight"
-                  >
-                    <Bot size={16} className={`${isLoadingInsight ? "animate-spin text-[#10b981]" : ""}`} />
-                  </button>
-                </div>
+          {/* Header */}
+          <div className="flex items-center justify-between mb-3 relative z-10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-white dark:bg-gray-800 shadow-sm flex items-center justify-center shrink-0 text-[#10b981]">
+                <span className="material-symbols-outlined fill text-[20px]">smart_toy</span>
               </div>
-
-              {isLoadingInsight ? (
-                <div className="space-y-2 py-1">
-                  <div className="h-4 bg-slate-200/65 dark:bg-gray-700 rounded animate-pulse w-full"></div>
-                  <div className="h-4 bg-slate-200/65 dark:bg-gray-700 rounded animate-pulse w-5/6"></div>
-                </div>
-              ) : (
-                <p className="text-sm md:text-md text-slate-600 dark:text-gray-300 italic leading-relaxed font-medium" id="insight-box-text">
-                  {insightText}
-                </p>
+              <div>
+                <h3 className="text-md font-bold text-slate-800 dark:text-white">DevFinancial AI</h3>
+                <p className="text-[10px] font-semibold text-slate-400 dark:text-gray-500">{chatHistory.length} pesan</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              {chatHistory.length > 2 && (
+                <button
+                  onClick={onClearChat}
+                  className="p-1.5 rounded-full hover:bg-white dark:hover:bg-gray-700 text-slate-400 hover:text-red-400 transition-all cursor-pointer active:scale-95 text-[11px] font-bold"
+                  title="Hapus riwayat chat"
+                >
+                  <span className="material-symbols-outlined text-[16px]">delete_sweep</span>
+                </button>
               )}
+              <button
+                onClick={onRefreshInsight}
+                disabled={isLoadingInsight}
+                className="p-1.5 rounded-full hover:bg-white dark:hover:bg-gray-700 text-slate-400 hover:text-[#10b981] disabled:opacity-50 transition-all cursor-pointer active:scale-95"
+                title="Minta saran baru"
+              >
+                <Bot size={16} className={`${isLoadingInsight ? "animate-spin text-[#10b981]" : ""}`} />
+              </button>
             </div>
           </div>
 
+          {/* Chat Messages - Scrollable */}
+          <div className="flex-1 overflow-y-auto space-y-3 relative z-10 pr-1 mb-3 min-h-[120px]" id="chat-messages-scroll">
+            {chatHistory.map((msg) => (
+              <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-1 duration-200`}>
+                <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${
+                  msg.role === "user" 
+                    ? "bg-[#006c49] dark:bg-[#10b981] text-white rounded-br-md" 
+                    : "bg-white dark:bg-gray-800 text-slate-700 dark:text-gray-200 border border-slate-100 dark:border-gray-700 shadow-xs rounded-bl-md"
+                }`}>
+                  <p className="text-[12px] font-medium leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                  <p className={`text-[9px] mt-1 font-semibold ${
+                    msg.role === "user" ? "text-white/60" : "text-slate-400 dark:text-gray-500"
+                  }`}>
+                    {new Date(msg.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+              </div>
+            ))}
+            {isLoadingInsight && (
+              <div className="flex justify-start animate-in fade-in duration-200">
+                <div className="bg-white dark:bg-gray-800 border border-slate-100 dark:border-gray-700 rounded-2xl rounded-bl-md px-4 py-3 shadow-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 bg-[#10b981] rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
+                    <span className="w-2 h-2 bg-[#10b981] rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
+                    <span className="w-2 h-2 bg-[#10b981] rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef}></div>
+          </div>
+
           {/* Quick Prompt Chips & Chat Input */}
-          <div className="mt-6 flex flex-col gap-3 relative z-10 w-full">
+          <div className="flex flex-col gap-2.5 relative z-10 w-full border-t border-sky-100/50 dark:border-sky-900/30 pt-3">
             {/* Quick Chips */}
             <div className="flex flex-wrap gap-1.5" id="chat-quick-chips">
-              <button
-                type="button"
-                onClick={() => handleChipClick("Bagaimana cara berhemat minggu ini?")}
-                disabled={isLoadingInsight}
-                className="text-[11px] font-bold bg-white dark:bg-gray-800 text-slate-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 hover:text-[#006c49] dark:hover:text-[#10b981] border border-slate-100 dark:border-gray-700 hover:border-emerald-200 px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-50"
-              >
-                💡 Tips Berhemat
-              </button>
-              <button
-                type="button"
-                onClick={() => handleChipClick("Analisis pola pengeluaran dan kategori belanja saya.")}
-                disabled={isLoadingInsight}
-                className="text-[11px] font-bold bg-white dark:bg-gray-800 text-slate-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 hover:text-[#006c49] dark:hover:text-[#10b981] border border-slate-100 dark:border-gray-700 hover:border-emerald-200 px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-50"
-              >
-                📊 Analisis Belanja
-              </button>
-              <button
-                type="button"
-                onClick={() => handleChipClick("Berikan saran investasi cerdas untuk pemula.")}
-                disabled={isLoadingInsight}
-                className="text-[11px] font-bold bg-white dark:bg-gray-800 text-slate-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 hover:text-[#006c49] dark:hover:text-[#10b981] border border-slate-100 dark:border-gray-700 hover:border-emerald-200 px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-50"
-              >
-                💰 Tips Investasi
-              </button>
+              <button type="button" onClick={() => handleChipClick("Bagaimana cara berhemat minggu ini?")} disabled={isLoadingInsight} className="text-[10px] font-bold bg-white dark:bg-gray-800 text-slate-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 hover:text-[#006c49] dark:hover:text-[#10b981] border border-slate-100 dark:border-gray-700 hover:border-emerald-200 px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-50">💡 Berhemat</button>
+              <button type="button" onClick={() => handleChipClick("Analisis pola pengeluaran dan kategori belanja saya.")} disabled={isLoadingInsight} className="text-[10px] font-bold bg-white dark:bg-gray-800 text-slate-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 hover:text-[#006c49] dark:hover:text-[#10b981] border border-slate-100 dark:border-gray-700 hover:border-emerald-200 px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-50">📊 Analisis</button>
+              <button type="button" onClick={() => handleChipClick("Berikan saran investasi cerdas untuk pemula.")} disabled={isLoadingInsight} className="text-[10px] font-bold bg-white dark:bg-gray-800 text-slate-600 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 hover:text-[#006c49] dark:hover:text-[#10b981] border border-slate-100 dark:border-gray-700 hover:border-emerald-200 px-2.5 py-1.5 rounded-full transition-all cursor-pointer disabled:opacity-50">💰 Investasi</button>
             </div>
-
             {/* Chat Form */}
-            <form onSubmit={handleChatSubmit} className="flex gap-2 w-full mt-1">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                disabled={isLoadingInsight}
-                placeholder="Tanya AI tentang keuangan..."
-                className="flex-1 bg-white dark:bg-gray-900 text-slate-800 dark:text-white text-xs font-semibold rounded-xl px-4 py-2.5 border border-slate-200 dark:border-gray-700 focus:outline-hidden focus:border-[#006c49] dark:focus:border-[#10b981] transition-all placeholder:text-slate-400"
-              />
-              <button
-                type="submit"
-                disabled={!chatInput.trim() || isLoadingInsight}
-                className="bg-[#006c49] hover:bg-[#005236] dark:bg-[#10b981] dark:hover:bg-[#0e9f6e] text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 disabled:opacity-50 flex items-center justify-center"
-              >
-                Tanya
-              </button>
+            <form onSubmit={handleChatSubmit} className="flex gap-2 w-full">
+              <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} disabled={isLoadingInsight} placeholder="Tanya AI tentang keuangan..." className="flex-1 bg-white dark:bg-gray-900 text-slate-800 dark:text-white text-xs font-semibold rounded-xl px-4 py-2.5 border border-slate-200 dark:border-gray-700 focus:outline-hidden focus:border-[#006c49] dark:focus:border-[#10b981] transition-all placeholder:text-slate-400" />
+              <button type="submit" disabled={!chatInput.trim() || isLoadingInsight} className="bg-[#006c49] hover:bg-[#005236] dark:bg-[#10b981] dark:hover:bg-[#0e9f6e] text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 disabled:opacity-50">Tanya</button>
             </form>
           </div>
         </section>
@@ -551,7 +684,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </span>
                   </div>
                   <div>
-                    <div className="text-sm font-bold text-slate-800 dark:text-white">{tx.category}</div>
+                    <div className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                      {tx.category}
+                      {tx.recurringRule && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/20 text-indigo-500 text-[9px] font-bold uppercase tracking-wider">
+                          <Repeat size={8} />
+                          {tx.recurringRule.frequency === "daily" ? "Harian" : tx.recurringRule.frequency === "weekly" ? "Mingguan" : "Bulanan"}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs text-slate-400 dark:text-gray-400 font-medium">
                       {isInc ? "Income" : "Expense"} • {tx.date === new Date().toISOString().split("T")[0] ? "Today" : tx.note || "Transaksi"}
                     </div>

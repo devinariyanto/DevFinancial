@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Transaction, UserSession, AppState } from "./types";
+import { Transaction, UserSession, AppState, ChatMessage } from "./types";
 import { INITIAL_TRANSACTIONS } from "./data";
 import { DashboardView } from "./components/DashboardView";
 import { AddTransactionModal } from "./components/AddTransactionModal";
@@ -43,6 +43,9 @@ export default function App() {
 
   // Toast state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Chat History state
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
 
   const handleSaveApiKey = (key: string) => {
     setGeminiApiKey(key);
@@ -160,6 +163,67 @@ export default function App() {
     } else {
       // Fetch initial AI Insight on mount if has transaction
       triggerAIInsight(savedTxs ? JSON.parse(savedTxs) : INITIAL_TRANSACTIONS, savedApiKey);
+    }
+
+    // Load chat history
+    const savedChat = localStorage.getItem("devfinancial_chat_history");
+    if (savedChat) {
+      try { setChatHistory(JSON.parse(savedChat)); } catch { /* ignore */ }
+    } else {
+      // Seed with welcome message
+      const welcomeMsg: ChatMessage = {
+        id: "welcome-1",
+        role: "ai",
+        text: "Halo! 👋 Saya DevFinancial AI, asisten keuangan pribadi Anda. Tanyakan apa saja tentang keuangan, atau gunakan tombol di bawah untuk saran cepat!",
+        timestamp: new Date().toISOString(),
+      };
+      setChatHistory([welcomeMsg]);
+      localStorage.setItem("devfinancial_chat_history", JSON.stringify([welcomeMsg]));
+    }
+
+    // Auto-generate recurring transactions
+    const currentTxs: Transaction[] = savedTxs ? JSON.parse(savedTxs) : INITIAL_TRANSACTIONS;
+    const today = new Date().toISOString().split("T")[0];
+    const todayDate = new Date(today);
+    let newTxs: Transaction[] = [];
+    const updatedTemplates: Transaction[] = currentTxs.map(tx => {
+      if (!tx.recurringRule) return tx;
+      const lastGen = new Date(tx.recurringRule.lastGenerated);
+      const freq = tx.recurringRule.frequency;
+      let nextDate = new Date(lastGen);
+      
+      if (freq === "daily") nextDate.setDate(nextDate.getDate() + 1);
+      else if (freq === "weekly") nextDate.setDate(nextDate.getDate() + 7);
+      else if (freq === "monthly") nextDate.setMonth(nextDate.getMonth() + 1);
+      
+      // Generate missed transactions up to today
+      while (nextDate <= todayDate) {
+        const dateStr = nextDate.toISOString().split("T")[0];
+        newTxs.push({
+          id: "tx-auto-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+          type: tx.type,
+          amount: tx.amount,
+          category: tx.category,
+          date: dateStr,
+          note: tx.note + " (otomatis)",
+          recurringRule: undefined, // generated copies are not templates
+        });
+        
+        if (freq === "daily") nextDate.setDate(nextDate.getDate() + 1);
+        else if (freq === "weekly") nextDate.setDate(nextDate.getDate() + 7);
+        else if (freq === "monthly") nextDate.setMonth(nextDate.getMonth() + 1);
+      }
+      
+      if (newTxs.length > 0) {
+        return { ...tx, recurringRule: { ...tx.recurringRule, lastGenerated: today } };
+      }
+      return tx;
+    });
+    
+    if (newTxs.length > 0) {
+      const allTxs = [...newTxs, ...updatedTemplates];
+      setTransactions(allTxs);
+      localStorage.setItem("devfinancial_txs", JSON.stringify(allTxs));
     }
   }, []);
 
@@ -282,6 +346,18 @@ export default function App() {
       if (data.insight) {
         setInsightText(data.insight);
         localStorage.setItem("devfinancial_insight", data.insight);
+        // Add to chat history
+        const aiMsg: ChatMessage = {
+          id: "ai-" + Date.now(),
+          role: "ai",
+          text: data.insight,
+          timestamp: new Date().toISOString(),
+        };
+        setChatHistory(prev => {
+          const updated = [...prev, aiMsg];
+          localStorage.setItem("devfinancial_chat_history", JSON.stringify(updated));
+          return updated;
+        });
       }
     } catch (err) {
       console.error("Failed to generate real AI insights:", err);
@@ -292,6 +368,19 @@ export default function App() {
 
   // Generate custom AI advice via Express route + Gemini API
   const triggerCustomAIQuery = async (query: string) => {
+    // Add user message to chat
+    const userMsg: ChatMessage = {
+      id: "user-" + Date.now(),
+      role: "user",
+      text: query,
+      timestamp: new Date().toISOString(),
+    };
+    setChatHistory(prev => {
+      const updated = [...prev, userMsg];
+      localStorage.setItem("devfinancial_chat_history", JSON.stringify(updated));
+      return updated;
+    });
+
     setIsLoadingInsight(true);
     const apiKey = geminiApiKey || localStorage.getItem("devfinancial_gemini_api_key") || "";
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -310,9 +399,32 @@ export default function App() {
       const data = await response.json();
       if (data.insight) {
         setInsightText(data.insight);
+        // Add AI response to chat
+        const aiMsg: ChatMessage = {
+          id: "ai-" + Date.now(),
+          role: "ai",
+          text: data.insight,
+          timestamp: new Date().toISOString(),
+        };
+        setChatHistory(prev => {
+          const updated = [...prev, aiMsg];
+          localStorage.setItem("devfinancial_chat_history", JSON.stringify(updated));
+          return updated;
+        });
       }
     } catch (err) {
       console.error("Failed to generate custom AI advice:", err);
+      const errorMsg: ChatMessage = {
+        id: "ai-err-" + Date.now(),
+        role: "ai",
+        text: "Maaf, terjadi kesalahan saat menghubungi AI. Silakan coba lagi.",
+        timestamp: new Date().toISOString(),
+      };
+      setChatHistory(prev => {
+        const updated = [...prev, errorMsg];
+        localStorage.setItem("devfinancial_chat_history", JSON.stringify(updated));
+        return updated;
+      });
     } finally {
       setIsLoadingInsight(false);
     }
@@ -536,6 +648,17 @@ export default function App() {
             onToggleHideBalances={handleToggleHideBalances}
             userName={user.name || ""}
             userAvatar={user.avatar || ""}
+            chatHistory={chatHistory}
+            onClearChat={() => {
+              const welcomeMsg: ChatMessage = {
+                id: "welcome-" + Date.now(),
+                role: "ai",
+                text: "Riwayat chat telah dihapus. Tanyakan apa saja tentang keuangan Anda! 🧹",
+                timestamp: new Date().toISOString(),
+              };
+              setChatHistory([welcomeMsg]);
+              localStorage.setItem("devfinancial_chat_history", JSON.stringify([welcomeMsg]));
+            }}
           />
         )}
 
